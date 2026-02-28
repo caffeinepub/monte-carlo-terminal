@@ -18,6 +18,7 @@ import {
   useGetAccounts,
   useUpdateAccount,
 } from "@/hooks/useQueries";
+
 import { cn } from "@/lib/utils";
 import {
   formatCurrency,
@@ -31,11 +32,15 @@ import { useState } from "react";
 import { toast } from "sonner";
 import type { Account } from "../backend.d";
 
-export default function AccountsPage() {
-  const { data: accounts, isLoading } = useGetAccounts();
-  const addAccount = useAddAccount();
-  const updateAccount = useUpdateAccount();
-  const deleteAccount = useDeleteAccount();
+interface AccountsPageProps {
+  clientId: string;
+}
+
+export default function AccountsPage({ clientId }: AccountsPageProps) {
+  const { data: accounts, isLoading } = useGetAccounts(clientId);
+  const addAccount = useAddAccount(clientId);
+  const updateAccount = useUpdateAccount(clientId);
+  const deleteAccount = useDeleteAccount(clientId);
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editAccount, setEditAccount] = useState<Account | null>(null);

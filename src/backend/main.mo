@@ -8,9 +8,9 @@ import Array "mo:core/Array";
 import Runtime "mo:core/Runtime";
 import Iter "mo:core/Iter";
 import Order "mo:core/Order";
-import Migration "migration";
 
-(with migration = Migration.run)
+
+
 actor {
   // Types
   public type Account = {

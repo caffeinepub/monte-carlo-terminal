@@ -1,7 +1,9 @@
 import { Button } from "@/components/ui/button";
+import type { Client } from "@/hooks/useQueries";
 import { cn } from "@/lib/utils";
 import {
   Activity,
+  ArrowLeft,
   BarChart3,
   ChevronRight,
   LayoutDashboard,
@@ -27,16 +29,27 @@ const navItems: NavItem[] = [
   { id: "results", label: "Results", icon: BarChart3, shortcut: "F3" },
 ];
 
+const RISK_COLORS: Record<Client["riskProfile"], string> = {
+  Conservative: "text-terminal-green",
+  Moderate: "text-terminal-amber",
+  Aggressive: "text-terminal-red",
+  Custom: "text-terminal-cyan",
+};
+
 interface LayoutProps {
   children: React.ReactNode;
   activePage: Page;
   onNavigate: (page: Page) => void;
+  activeClient?: Client | null;
+  onBackToClients?: () => void;
 }
 
 export default function Layout({
   children,
   activePage,
   onNavigate,
+  activeClient,
+  onBackToClients,
 }: LayoutProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -64,6 +77,45 @@ export default function Layout({
             </div>
           </div>
         </div>
+
+        {/* Client context */}
+        {activeClient && (
+          <div className="px-3 py-2 border-b border-sidebar-border space-y-1.5">
+            <button
+              type="button"
+              onClick={onBackToClients}
+              className="flex items-center gap-1.5 text-[10px] font-mono text-muted-foreground/60 hover:text-terminal-green transition-colors"
+            >
+              <ArrowLeft className="w-3 h-3" />
+              Clients
+            </button>
+            <div>
+              <p
+                className={cn(
+                  "text-xs font-mono font-bold tracking-wider truncate",
+                  RISK_COLORS[activeClient.riskProfile],
+                )}
+              >
+                {activeClient.name.toUpperCase()}
+              </p>
+              <span
+                className={cn(
+                  "inline-flex items-center px-1 py-0.5 rounded text-[9px] font-mono border mt-0.5",
+                  activeClient.riskProfile === "Conservative" &&
+                    "border-terminal-green/30 text-terminal-green bg-terminal-green/10",
+                  activeClient.riskProfile === "Moderate" &&
+                    "border-terminal-amber/30 text-terminal-amber bg-terminal-amber/10",
+                  activeClient.riskProfile === "Aggressive" &&
+                    "border-terminal-red/30 text-terminal-red bg-terminal-red/10",
+                  activeClient.riskProfile === "Custom" &&
+                    "border-terminal-cyan/30 text-terminal-cyan bg-terminal-cyan/10",
+                )}
+              >
+                {activeClient.riskProfile}
+              </span>
+            </div>
+          </div>
+        )}
 
         {/* Nav */}
         <nav className="flex-1 px-2 py-4 space-y-1">
@@ -167,6 +219,31 @@ export default function Layout({
                   </Button>
                 </div>
               </div>
+              {/* Mobile client context */}
+              {activeClient && (
+                <div className="px-3 py-2 border-b border-sidebar-border space-y-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSidebarOpen(false);
+                      onBackToClients?.();
+                    }}
+                    className="flex items-center gap-1.5 text-[10px] font-mono text-muted-foreground/60 hover:text-terminal-green transition-colors"
+                  >
+                    <ArrowLeft className="w-3 h-3" />
+                    Back to Clients
+                  </button>
+                  <p
+                    className={cn(
+                      "text-xs font-mono font-bold tracking-wider truncate",
+                      RISK_COLORS[activeClient.riskProfile],
+                    )}
+                  >
+                    {activeClient.name.toUpperCase()}
+                  </p>
+                </div>
+              )}
+
               <nav className="flex-1 px-2 py-4 space-y-1">
                 {navItems.map((item) => {
                   const Icon = item.icon;

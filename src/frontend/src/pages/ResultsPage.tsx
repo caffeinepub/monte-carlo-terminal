@@ -20,8 +20,10 @@ import {
   useClearSimulationHistory,
   useGetSimulationHistory,
 } from "@/hooks/useQueries";
+
 import { cn } from "@/lib/utils";
 import { formatCurrency, formatPercent, formatTimestamp } from "@/utils/format";
+import type { ExtendedSimulationResult } from "@/utils/monteCarlo";
 import {
   AlertTriangle,
   BarChart3,
@@ -48,8 +50,11 @@ import {
 import { toast } from "sonner";
 import type { SimulationResult, YearStats } from "../backend.d";
 
+type DisplayMode = "nominal" | "real";
+
 interface ResultsPageProps {
-  latestResult?: SimulationResult | null;
+  clientId: string;
+  latestResult?: ExtendedSimulationResult | SimulationResult | null;
 }
 
 interface ChartDataPoint {
@@ -60,15 +65,17 @@ interface ChartDataPoint {
   p75: number;
   p90: number;
   mean: number;
-  // Stacked band deltas for tier visualization
-  base: number; // p10 (floor of visible chart)
-  band1: number; // p25 - p10 (Bear Case)
-  band2: number; // p50 - p25 (Below Median)
-  band3: number; // p75 - p50 (Above Median)
-  band4: number; // p90 - p75 (Bull Case)
+  base: number;
+  band1: number;
+  band2: number;
+  band3: number;
+  band4: number;
 }
 
-function buildChartData(result: SimulationResult): ChartDataPoint[] {
+function buildChartData(
+  result: SimulationResult | ExtendedSimulationResult,
+  mode: DisplayMode,
+): ChartDataPoint[] {
   const makePoint = (
     year: number,
     p10: number,
@@ -92,10 +99,27 @@ function buildChartData(result: SimulationResult): ChartDataPoint[] {
     band4: Math.max(p90 - p75, 0),
   });
 
+  const isExtended = "yearlyStatsReal" in result;
   const iv = result.totalInitialValue;
-  const initial = makePoint(0, iv, iv, iv, iv, iv, iv);
 
-  const yearly = result.yearlyStats.map((ys: YearStats) =>
+  // For real mode, adjust the initial value too
+  const extResult = isExtended ? (result as ExtendedSimulationResult) : null;
+  const inflRate = extResult
+    ? ((extResult.config as unknown as { inflationRate?: number })
+        .inflationRate ?? 0)
+    : 0;
+  const ivReal = mode === "real" && inflRate > 0 ? iv : iv; // year 0 = today's dollars (no adjustment)
+
+  const initial = makePoint(0, ivReal, ivReal, ivReal, ivReal, ivReal, ivReal);
+
+  let stats: YearStats[];
+  if (mode === "real" && isExtended && extResult?.yearlyStatsReal?.length) {
+    stats = extResult.yearlyStatsReal;
+  } else {
+    stats = result.yearlyStats;
+  }
+
+  const yearly = stats.map((ys: YearStats) =>
     makePoint(
       Number(ys.year),
       Math.round(ys.p10),
@@ -120,7 +144,6 @@ function formatYAxis(value: number): string {
   return `$${value}`;
 }
 
-// Tranche tier definitions
 const TRANCHES = [
   {
     key: "T5",
@@ -134,12 +157,7 @@ const TRANCHES = [
     range: "P50–P75",
     color: "oklch(0.74 0.19 145)",
   },
-  {
-    key: "T3",
-    label: "Median",
-    range: "P50",
-    color: "oklch(0.78 0.19 145)",
-  },
+  { key: "T3", label: "Median", range: "P50", color: "oklch(0.78 0.19 145)" },
   {
     key: "T2",
     label: "Below Median",
@@ -154,7 +172,6 @@ const TRANCHES = [
   },
 ];
 
-// Custom tooltip
 function ChartTooltip({
   active,
   payload,
@@ -165,7 +182,6 @@ function ChartTooltip({
   label?: string;
 }) {
   if (!active || !payload || !payload.length) return null;
-
   const raw = payload[0]?.payload as ChartDataPoint | undefined;
   if (!raw) return null;
 
@@ -240,19 +256,63 @@ function ChartTooltip({
   );
 }
 
-export default function ResultsPage({ latestResult }: ResultsPageProps) {
+export default function ResultsPage({
+  clientId,
+  latestResult,
+}: ResultsPageProps) {
   const { data: history, isLoading: historyLoading } =
-    useGetSimulationHistory();
-  const clearHistory = useClearSimulationHistory();
+    useGetSimulationHistory(clientId);
+  const clearHistory = useClearSimulationHistory(clientId);
   const [selectedId, setSelectedId] = useState<bigint | null>(null);
   const [clearDialogOpen, setClearDialogOpen] = useState(false);
+  const [displayMode, setDisplayMode] = useState<DisplayMode>("nominal");
 
   // Choose which result to display
-  const displayResult: SimulationResult | null =
+  const displayResult: SimulationResult | ExtendedSimulationResult | null =
     selectedId !== null
       ? (history?.find((r) => r.id === selectedId) ?? null)
       : (latestResult ??
         (history && history.length > 0 ? history[history.length - 1] : null));
+
+  const isExtended = displayResult && "yearlyStatsReal" in displayResult;
+  const extResult = isExtended
+    ? (displayResult as ExtendedSimulationResult)
+    : null;
+
+  // Extended config fields (cast since backend.d.ts may not have them)
+  type ExtConfig = {
+    numSimulations: bigint;
+    timeHorizonYears: bigint;
+    annualContribution: number;
+    targetValue?: number;
+    inflationRate?: number;
+    taxDrag?: number;
+    crashYear?: bigint;
+    crashDrawdown?: number;
+  };
+  const extConfig: ExtConfig | null = displayResult
+    ? (displayResult.config as ExtConfig)
+    : null;
+
+  const hasRealData = !!extResult?.yearlyStatsReal?.length;
+
+  // Use real or nominal final percentiles
+  const finalP10 =
+    displayMode === "real" && hasRealData
+      ? (extResult?.finalP10Real ?? displayResult?.finalP10 ?? 0)
+      : (displayResult?.finalP10 ?? 0);
+  const finalP50 =
+    displayMode === "real" && hasRealData
+      ? (extResult?.finalP50Real ?? displayResult?.finalP50 ?? 0)
+      : (displayResult?.finalP50 ?? 0);
+  const finalP75 =
+    displayMode === "real" && hasRealData
+      ? (extResult?.finalP75Real ?? displayResult?.finalP75 ?? 0)
+      : (displayResult?.finalP75 ?? 0);
+  const finalP90 =
+    displayMode === "real" && hasRealData
+      ? (extResult?.finalP90Real ?? displayResult?.finalP90 ?? 0)
+      : (displayResult?.finalP90 ?? 0);
 
   const handleClearHistory = async () => {
     try {
@@ -265,14 +325,16 @@ export default function ResultsPage({ latestResult }: ResultsPageProps) {
     setClearDialogOpen(false);
   };
 
-  const chartData = displayResult ? buildChartData(displayResult) : [];
+  const chartData = displayResult
+    ? buildChartData(displayResult, displayMode)
+    : [];
 
   const hasTarget =
     displayResult?.config?.targetValue !== undefined &&
     displayResult.config.targetValue > 0;
 
   const profitLoss = displayResult
-    ? displayResult.finalP50 - displayResult.totalInitialValue
+    ? finalP50 - displayResult.totalInitialValue
     : 0;
   const profitLossPercent = displayResult
     ? (profitLoss / displayResult.totalInitialValue) * 100
@@ -292,7 +354,42 @@ export default function ResultsPage({ latestResult }: ResultsPageProps) {
           </h1>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap justify-end">
+          {/* Nominal / Real toggle */}
+          <div className="flex items-center rounded border border-border overflow-hidden font-mono text-xs">
+            <button
+              type="button"
+              onClick={() => setDisplayMode("nominal")}
+              className={cn(
+                "px-3 py-1.5 transition-colors",
+                displayMode === "nominal"
+                  ? "bg-terminal-green text-primary-foreground font-bold"
+                  : "text-muted-foreground hover:text-foreground hover:bg-accent/30",
+              )}
+            >
+              Nominal
+            </button>
+            <button
+              type="button"
+              onClick={() => setDisplayMode("real")}
+              className={cn(
+                "px-3 py-1.5 transition-colors border-l border-border",
+                displayMode === "real"
+                  ? "bg-terminal-amber text-primary-foreground font-bold"
+                  : "text-muted-foreground hover:text-foreground hover:bg-accent/30",
+                !hasRealData && "opacity-40 cursor-not-allowed",
+              )}
+              disabled={!hasRealData}
+              title={
+                !hasRealData
+                  ? "Real data only available for newly run simulations"
+                  : undefined
+              }
+            >
+              Real (Inflation-Adj.)
+            </button>
+          </div>
+
           {/* History picker */}
           {history && history.length > 0 && (
             <DropdownMenu>
@@ -308,7 +405,7 @@ export default function ResultsPage({ latestResult }: ResultsPageProps) {
               </DropdownMenuTrigger>
               <DropdownMenuContent
                 align="end"
-                className="bg-popover border-border font-mono w-56 max-h-64 overflow-y-auto"
+                className="bg-popover border-border font-mono w-64 max-h-64 overflow-y-auto"
               >
                 {[...history].reverse().map((sim) => (
                   <DropdownMenuItem
@@ -390,6 +487,20 @@ export default function ResultsPage({ latestResult }: ResultsPageProps) {
           animate={{ opacity: 1 }}
           className="space-y-6"
         >
+          {/* Display mode indicator */}
+          {displayMode === "real" && (
+            <div className="flex items-center gap-2 px-4 py-2.5 rounded border border-terminal-amber/30 bg-terminal-amber/5 text-terminal-amber text-xs font-mono">
+              <TrendingDown className="w-3.5 h-3.5 shrink-0" />
+              Showing inflation-adjusted (real) values — purchasing power in
+              today's dollars
+              {extConfig?.inflationRate !== undefined && (
+                <span className="ml-auto font-bold">
+                  @ {(extConfig.inflationRate * 100).toFixed(1)}% inflation
+                </span>
+              )}
+            </div>
+          )}
+
           {/* Sim metadata bar */}
           <div className="flex flex-wrap items-center gap-3 text-xs font-mono text-muted-foreground">
             <span className="flex items-center gap-1.5">
@@ -407,6 +518,31 @@ export default function ResultsPage({ latestResult }: ResultsPageProps) {
             <span>
               {Number(displayResult.config.timeHorizonYears)} year horizon
             </span>
+            {extConfig?.inflationRate !== undefined && (
+              <>
+                <span className="opacity-30">·</span>
+                <span className="text-terminal-amber">
+                  {(extConfig.inflationRate * 100).toFixed(1)}% inflation
+                </span>
+              </>
+            )}
+            {extConfig?.taxDrag !== undefined && extConfig.taxDrag > 0 && (
+              <>
+                <span className="opacity-30">·</span>
+                <span className="text-terminal-amber">
+                  {(extConfig.taxDrag * 100).toFixed(1)}% tax drag
+                </span>
+              </>
+            )}
+            {extConfig?.crashYear !== undefined && (
+              <>
+                <span className="opacity-30">·</span>
+                <span className="text-terminal-red">
+                  Crash Yr {String(extConfig.crashYear)} / -
+                  {((extConfig.crashDrawdown ?? 0) * 100).toFixed(0)}%
+                </span>
+              </>
+            )}
             <span className="opacity-30">·</span>
             <span className="text-muted-foreground/60">
               {formatTimestamp(displayResult.timestamp)}
@@ -422,8 +558,10 @@ export default function ResultsPage({ latestResult }: ResultsPageProps) {
               accent="default"
             />
             <StatCard
-              label="P50 Median"
-              value={formatCurrency(displayResult.finalP50, true)}
+              label={
+                displayMode === "real" ? "P50 Median (Real)" : "P50 Median"
+              }
+              value={formatCurrency(finalP50, true)}
               sub={`${profitLossPercent >= 0 ? "+" : ""}${profitLossPercent.toFixed(0)}% vs initial`}
               accent={profitLossPercent >= 0 ? "green" : "red"}
               icon={
@@ -435,23 +573,37 @@ export default function ResultsPage({ latestResult }: ResultsPageProps) {
               }
             />
             <StatCard
-              label="P10 Pessimistic"
-              value={formatCurrency(displayResult.finalP10, true)}
+              label={
+                displayMode === "real"
+                  ? "P10 Pessimistic (Real)"
+                  : "P10 Pessimistic"
+              }
+              value={formatCurrency(finalP10, true)}
               sub="worst 10% outcomes"
               accent="red"
             />
             <StatCard
-              label="P90 Optimistic"
-              value={formatCurrency(displayResult.finalP90, true)}
+              label={
+                displayMode === "real"
+                  ? "P90 Optimistic (Real)"
+                  : "P90 Optimistic"
+              }
+              value={formatCurrency(finalP90, true)}
               sub="best 10% outcomes"
               accent="green"
             />
             <StatCard
-              label={hasTarget ? "Goal Probability" : "P75 Outcome"}
+              label={
+                hasTarget
+                  ? "Goal Probability"
+                  : displayMode === "real"
+                    ? "P75 Outcome (Real)"
+                    : "P75 Outcome"
+              }
               value={
                 hasTarget
                   ? formatPercent(displayResult.probabilityOfGoal)
-                  : formatCurrency(displayResult.finalP75, true)
+                  : formatCurrency(finalP75, true)
               }
               sub={
                 hasTarget
@@ -474,10 +626,17 @@ export default function ResultsPage({ latestResult }: ResultsPageProps) {
           {/* ── Chart ── */}
           <div className="rounded border border-border bg-card p-5 shadow-terminal-card">
             <div className="flex flex-wrap items-start justify-between gap-4 mb-5">
-              <h2 className="text-xs font-mono tracking-widest text-muted-foreground uppercase flex items-center gap-2">
-                <BarChart3 className="w-3.5 h-3.5 text-terminal-green" />
-                Monte Carlo Tranche Bands
-              </h2>
+              <div className="flex items-center gap-3">
+                <h2 className="text-xs font-mono tracking-widest text-muted-foreground uppercase flex items-center gap-2">
+                  <BarChart3 className="w-3.5 h-3.5 text-terminal-green" />
+                  Monte Carlo Tranche Bands
+                </h2>
+                {displayMode === "real" && (
+                  <span className="text-[10px] font-mono text-terminal-amber border border-terminal-amber/30 bg-terminal-amber/10 px-1.5 py-0.5 rounded">
+                    REAL
+                  </span>
+                )}
+              </div>
               {/* Tranche legend */}
               <div className="flex flex-wrap items-center gap-3 text-[10px] font-mono">
                 {TRANCHES.map((t) => (
@@ -506,7 +665,6 @@ export default function ResultsPage({ latestResult }: ResultsPageProps) {
                 margin={{ top: 8, right: 16, left: 16, bottom: 8 }}
               >
                 <defs>
-                  {/* Gradient for Bear Case (T1: P10–P25) */}
                   <linearGradient id="gradT1" x1="0" y1="0" x2="0" y2="1">
                     <stop
                       offset="0%"
@@ -519,7 +677,6 @@ export default function ResultsPage({ latestResult }: ResultsPageProps) {
                       stopOpacity={0.35}
                     />
                   </linearGradient>
-                  {/* Gradient for Below Median (T2: P25–P50) */}
                   <linearGradient id="gradT2" x1="0" y1="0" x2="0" y2="1">
                     <stop
                       offset="0%"
@@ -532,7 +689,6 @@ export default function ResultsPage({ latestResult }: ResultsPageProps) {
                       stopOpacity={0.38}
                     />
                   </linearGradient>
-                  {/* Gradient for Above Median (T4: P50–P75) */}
                   <linearGradient id="gradT4" x1="0" y1="0" x2="0" y2="1">
                     <stop
                       offset="0%"
@@ -545,7 +701,6 @@ export default function ResultsPage({ latestResult }: ResultsPageProps) {
                       stopOpacity={0.4}
                     />
                   </linearGradient>
-                  {/* Gradient for Bull Case (T5: P75–P90) */}
                   <linearGradient id="gradT5" x1="0" y1="0" x2="0" y2="1">
                     <stop
                       offset="0%"
@@ -599,11 +754,6 @@ export default function ResultsPage({ latestResult }: ResultsPageProps) {
 
                 <Tooltip content={<ChartTooltip />} />
 
-                {/* Stacked tranche bands from bottom up:
-                    base (p10 floor) → band1 (T1 Bear: p25-p10) → band2 (T2 Below: p50-p25)
-                    → band3 (T4 Above: p75-p50) → band4 (T5 Bull: p90-p75) */}
-
-                {/* Floor: transparent base from 0 up to p10 */}
                 <Area
                   type="monotone"
                   dataKey="base"
@@ -614,8 +764,6 @@ export default function ResultsPage({ latestResult }: ResultsPageProps) {
                   legendType="none"
                   name="floor"
                 />
-
-                {/* T1: Bear Case (P10–P25) — darkest green */}
                 <Area
                   type="monotone"
                   dataKey="band1"
@@ -629,8 +777,6 @@ export default function ResultsPage({ latestResult }: ResultsPageProps) {
                   animationBegin={0}
                   name="Bear Case (P10–P25)"
                 />
-
-                {/* T2: Below Median (P25–P50) — medium-dark green */}
                 <Area
                   type="monotone"
                   dataKey="band2"
@@ -644,8 +790,6 @@ export default function ResultsPage({ latestResult }: ResultsPageProps) {
                   animationBegin={100}
                   name="Below Median (P25–P50)"
                 />
-
-                {/* T4: Above Median (P50–P75) — medium-bright green */}
                 <Area
                   type="monotone"
                   dataKey="band3"
@@ -659,8 +803,6 @@ export default function ResultsPage({ latestResult }: ResultsPageProps) {
                   animationBegin={200}
                   name="Above Median (P50–P75)"
                 />
-
-                {/* T5: Bull Case (P75–P90) — brightest green */}
                 <Area
                   type="monotone"
                   dataKey="band4"
@@ -674,8 +816,6 @@ export default function ResultsPage({ latestResult }: ResultsPageProps) {
                   animationBegin={300}
                   name="Bull Case (P75–P90)"
                 />
-
-                {/* T3: P50 Median — bright bold line on top (not stacked) */}
                 <Area
                   type="monotone"
                   dataKey="p50"
@@ -689,7 +829,6 @@ export default function ResultsPage({ latestResult }: ResultsPageProps) {
                   name="Median (P50)"
                 />
 
-                {/* Initial value reference line */}
                 <ReferenceLine
                   y={displayResult.totalInitialValue}
                   stroke="oklch(0.50 0.05 145)"
@@ -704,7 +843,6 @@ export default function ResultsPage({ latestResult }: ResultsPageProps) {
                   }}
                 />
 
-                {/* Target value reference line */}
                 {hasTarget && displayResult.config.targetValue && (
                   <ReferenceLine
                     y={displayResult.config.targetValue}
@@ -726,25 +864,42 @@ export default function ResultsPage({ latestResult }: ResultsPageProps) {
 
           {/* ── Percentile breakdown table ── */}
           <div className="rounded border border-border bg-card shadow-terminal-card overflow-hidden">
-            <div className="px-5 py-3 border-b border-border bg-background/50">
+            <div className="px-5 py-3 border-b border-border bg-background/50 flex items-center justify-between">
               <h2 className="text-xs font-mono tracking-widest text-muted-foreground uppercase">
                 Final Year Percentile Distribution
               </h2>
+              {hasRealData && (
+                <span className="text-[10px] font-mono text-muted-foreground/50">
+                  Showing Nominal + Real side by side
+                </span>
+              )}
             </div>
             <div className="overflow-x-auto">
               <table className="w-full font-mono text-sm">
                 <thead>
                   <tr className="border-b border-border/50">
-                    {["Percentile", "Final Value", "vs Initial", "Growth"].map(
-                      (h) => (
-                        <th
-                          key={h}
-                          className="px-5 py-2 text-left text-[10px] tracking-widest text-muted-foreground uppercase"
-                        >
-                          {h}
-                        </th>
-                      ),
+                    <th className="px-5 py-2 text-left text-[10px] tracking-widest text-muted-foreground uppercase">
+                      Percentile
+                    </th>
+                    <th className="px-5 py-2 text-left text-[10px] tracking-widest text-muted-foreground uppercase">
+                      Nominal Value
+                    </th>
+                    <th className="px-5 py-2 text-left text-[10px] tracking-widest text-muted-foreground uppercase">
+                      vs Initial
+                    </th>
+                    {hasRealData && (
+                      <th className="px-5 py-2 text-left text-[10px] tracking-widest text-terminal-amber/70 uppercase">
+                        Real Value
+                      </th>
                     )}
+                    {hasRealData && (
+                      <th className="px-5 py-2 text-left text-[10px] tracking-widest text-terminal-amber/70 uppercase">
+                        Real vs Initial
+                      </th>
+                    )}
+                    <th className="px-5 py-2 text-left text-[10px] tracking-widest text-muted-foreground uppercase">
+                      Growth (CAGR)
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -752,40 +907,53 @@ export default function ResultsPage({ latestResult }: ResultsPageProps) {
                     {
                       pct: "P10",
                       label: "Pessimistic",
-                      val: displayResult.finalP10,
+                      nomVal: displayResult.finalP10,
+                      realVal: extResult?.finalP10Real,
                       color: "text-terminal-red",
                     },
                     {
                       pct: "P25",
                       label: "Below Median",
-                      val: displayResult.finalP25,
+                      nomVal: displayResult.finalP25,
+                      realVal: extResult?.finalP25Real,
                       color: "text-terminal-amber",
                     },
                     {
                       pct: "P50",
                       label: "Median",
-                      val: displayResult.finalP50,
+                      nomVal: displayResult.finalP50,
+                      realVal: extResult?.finalP50Real,
                       color: "text-foreground",
                       bold: true,
                     },
                     {
                       pct: "P75",
                       label: "Above Median",
-                      val: displayResult.finalP75,
+                      nomVal: displayResult.finalP75,
+                      realVal: extResult?.finalP75Real,
                       color: "text-terminal-cyan",
                     },
                     {
                       pct: "P90",
                       label: "Optimistic",
-                      val: displayResult.finalP90,
+                      nomVal: displayResult.finalP90,
+                      realVal: extResult?.finalP90Real,
                       color: "text-terminal-green",
                     },
-                  ].map(({ pct, label, val, color, bold }) => {
-                    const diff = val - displayResult.totalInitialValue;
+                  ].map(({ pct, label, nomVal, realVal, color, bold }) => {
+                    const diff = nomVal - displayResult.totalInitialValue;
                     const pctGrowth =
                       (diff / displayResult.totalInitialValue) * 100;
+                    const realDiff =
+                      realVal !== undefined
+                        ? realVal - displayResult.totalInitialValue
+                        : null;
+                    const realPctGrowth =
+                      realDiff !== null
+                        ? (realDiff / displayResult.totalInitialValue) * 100
+                        : null;
                     const cagr =
-                      (val / displayResult.totalInitialValue) **
+                      (nomVal / displayResult.totalInitialValue) **
                         (1 / Number(displayResult.config.timeHorizonYears)) -
                       1;
                     return (
@@ -808,7 +976,7 @@ export default function ResultsPage({ latestResult }: ResultsPageProps) {
                             color,
                           )}
                         >
-                          {formatCurrency(val)}
+                          {formatCurrency(nomVal)}
                         </td>
                         <td
                           className={cn(
@@ -821,6 +989,31 @@ export default function ResultsPage({ latestResult }: ResultsPageProps) {
                           {diff >= 0 ? "+" : ""}
                           {pctGrowth.toFixed(0)}%
                         </td>
+                        {hasRealData && (
+                          <td
+                            className={cn(
+                              "px-5 py-3 data-value text-xs text-terminal-amber",
+                            )}
+                          >
+                            {realVal !== undefined
+                              ? formatCurrency(realVal)
+                              : "—"}
+                          </td>
+                        )}
+                        {hasRealData && (
+                          <td
+                            className={cn(
+                              "px-5 py-3 data-value text-xs",
+                              realDiff !== null && realDiff >= 0
+                                ? "text-terminal-amber"
+                                : "text-terminal-red",
+                            )}
+                          >
+                            {realPctGrowth !== null
+                              ? `${realPctGrowth >= 0 ? "+" : ""}${realPctGrowth.toFixed(0)}%`
+                              : "—"}
+                          </td>
+                        )}
                         <td className="px-5 py-3 text-xs text-muted-foreground data-value">
                           {(cagr * 100).toFixed(1)}% CAGR
                         </td>
@@ -851,9 +1044,9 @@ export default function ResultsPage({ latestResult }: ResultsPageProps) {
                 </span>
               </span>
               <span>
-                Annual Contribution:{" "}
+                Initial Value:{" "}
                 <span className="text-foreground/70">
-                  {formatCurrency(displayResult.config.annualContribution)}/yr
+                  {formatCurrency(displayResult.totalInitialValue)}
                 </span>
               </span>
               {hasTarget && (
@@ -864,12 +1057,31 @@ export default function ResultsPage({ latestResult }: ResultsPageProps) {
                   </span>
                 </span>
               )}
-              <span>
-                Initial Value:{" "}
-                <span className="text-foreground/70">
-                  {formatCurrency(displayResult.totalInitialValue)}
+              {extConfig?.inflationRate !== undefined && (
+                <span>
+                  Inflation:{" "}
+                  <span className="text-terminal-amber">
+                    {(extConfig.inflationRate * 100).toFixed(1)}%/yr
+                  </span>
                 </span>
-              </span>
+              )}
+              {extConfig?.taxDrag !== undefined && extConfig.taxDrag > 0 && (
+                <span>
+                  Tax Drag:{" "}
+                  <span className="text-terminal-amber">
+                    {(extConfig.taxDrag * 100).toFixed(1)}%
+                  </span>
+                </span>
+              )}
+              {extConfig?.crashYear !== undefined && (
+                <span>
+                  Crash:{" "}
+                  <span className="text-terminal-red">
+                    Yr {String(extConfig.crashYear)} / -
+                    {((extConfig.crashDrawdown ?? 0) * 100).toFixed(0)}%
+                  </span>
+                </span>
+              )}
             </div>
           </div>
         </motion.div>
