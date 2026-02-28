@@ -1,0 +1,228 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─── JetBrains Mono ─── */
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("/assets/fonts/JetBrainsMono[wght].woff2") format("woff2");
+  font-weight: 100 800;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ─── Geist Mono ─── */
+@font-face {
+  font-family: "Geist Mono";
+  src: url("/assets/fonts/GeistMono[wght].woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ─── Mona Sans ─── */
+@font-face {
+  font-family: "Mona Sans";
+  src: url("/assets/fonts/MonaSans[wdth,wght].woff2") format("woff2 supports variations"),
+       url("/assets/fonts/MonaSans[wdth,wght].woff2") format("woff2-variations");
+  font-weight: 200 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@layer base {
+  :root {
+    --radius: 0.25rem;
+
+    /* === MONTE CARLO TERMINAL — DARK TERMINAL THEME === */
+
+    /* Base surfaces — deep black-green tinted */
+    --background: 0.10 0.012 155;
+    --foreground: 0.92 0.04 145;
+
+    /* Cards */
+    --card: 0.13 0.015 155;
+    --card-foreground: 0.92 0.04 145;
+
+    /* Popover */
+    --popover: 0.15 0.018 155;
+    --popover-foreground: 0.92 0.04 145;
+
+    /* Primary — phosphor green accent */
+    --primary: 0.78 0.19 145;
+    --primary-foreground: 0.08 0.01 155;
+
+    /* Secondary — dimmed surface */
+    --secondary: 0.18 0.018 155;
+    --secondary-foreground: 0.70 0.05 145;
+
+    /* Muted */
+    --muted: 0.16 0.012 155;
+    --muted-foreground: 0.50 0.05 145;
+
+    /* Accent — electric cyan for highlights */
+    --accent: 0.22 0.025 180;
+    --accent-foreground: 0.82 0.12 175;
+
+    /* Destructive — warning red */
+    --destructive: 0.65 0.22 25;
+    --destructive-foreground: 0.97 0 0;
+
+    /* Borders & inputs */
+    --border: 0.22 0.025 155;
+    --input: 0.18 0.018 155;
+    --ring: 0.78 0.19 145;
+
+    /* Chart colors */
+    --chart-1: 0.78 0.19 145;
+    --chart-2: 0.65 0.16 175;
+    --chart-3: 0.72 0.18 90;
+    --chart-4: 0.68 0.21 50;
+    --chart-5: 0.62 0.22 20;
+
+    /* Sidebar */
+    --sidebar: 0.11 0.014 155;
+    --sidebar-foreground: 0.85 0.04 145;
+    --sidebar-primary: 0.78 0.19 145;
+    --sidebar-primary-foreground: 0.08 0.01 155;
+    --sidebar-accent: 0.17 0.02 155;
+    --sidebar-accent-foreground: 0.78 0.19 145;
+    --sidebar-border: 0.20 0.022 155;
+    --sidebar-ring: 0.78 0.19 145;
+
+    /* Terminal custom tokens */
+    --terminal-green: 0.78 0.19 145;
+    --terminal-green-dim: 0.55 0.15 145;
+    --terminal-green-glow: 0.82 0.22 145;
+    --terminal-cyan: 0.75 0.16 175;
+    --terminal-amber: 0.78 0.18 80;
+    --terminal-red: 0.62 0.22 22;
+    --terminal-surface: 0.13 0.015 155;
+    --terminal-border: 0.22 0.025 155;
+    --scan-line-opacity: 0.025;
+  }
+
+  html {
+    color-scheme: dark;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-mono antialiased;
+    font-family: "Geist Mono", "JetBrains Mono", ui-monospace, monospace;
+  }
+
+  /* Scrollbar styling */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: oklch(var(--background));
+  }
+  ::-webkit-scrollbar-thumb {
+    background: oklch(var(--border));
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: oklch(var(--terminal-green-dim));
+  }
+}
+
+@layer utilities {
+  /* Terminal scanline texture */
+  .scanlines {
+    position: relative;
+    overflow: hidden;
+  }
+  .scanlines::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0, 0, 0, var(--scan-line-opacity)) 2px,
+      rgba(0, 0, 0, var(--scan-line-opacity)) 4px
+    );
+    pointer-events: none;
+    z-index: 10;
+  }
+
+  /* Green phosphor glow */
+  .glow-green {
+    text-shadow: 0 0 10px oklch(var(--terminal-green) / 0.6),
+                 0 0 20px oklch(var(--terminal-green) / 0.3);
+  }
+
+  .glow-green-border {
+    box-shadow: 0 0 0 1px oklch(var(--terminal-green) / 0.5),
+                0 0 12px oklch(var(--terminal-green) / 0.15),
+                inset 0 0 12px oklch(var(--terminal-green) / 0.03);
+  }
+
+  .glow-cyan-border {
+    box-shadow: 0 0 0 1px oklch(var(--terminal-cyan) / 0.5),
+                0 0 12px oklch(var(--terminal-cyan) / 0.15);
+  }
+
+  /* Terminal cursor blink */
+  .cursor-blink::after {
+    content: "█";
+    animation: blink 1.1s step-end infinite;
+    color: oklch(var(--terminal-green));
+    opacity: 0.9;
+  }
+
+  @keyframes blink {
+    0%, 100% { opacity: 0.9; }
+    50% { opacity: 0; }
+  }
+
+  /* Noise overlay for depth */
+  .noise-overlay {
+    position: relative;
+  }
+  .noise-overlay::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
+    pointer-events: none;
+    z-index: 0;
+    opacity: 0.4;
+    border-radius: inherit;
+  }
+
+  /* Monospace data values */
+  .data-value {
+    font-family: "JetBrains Mono", "Geist Mono", ui-monospace, monospace;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.02em;
+  }
+
+  /* Terminal line prefix */
+  .terminal-prefix::before {
+    content: "› ";
+    color: oklch(var(--terminal-green-dim));
+  }
+
+  /* Status dot */
+  .status-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: oklch(var(--terminal-green));
+    box-shadow: 0 0 6px oklch(var(--terminal-green) / 0.8);
+    animation: pulse-dot 2s ease-in-out infinite;
+  }
+
+  @keyframes pulse-dot {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.6; transform: scale(0.85); }
+  }
+}
