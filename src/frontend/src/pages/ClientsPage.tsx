@@ -31,7 +31,7 @@ import {
   Users,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { toast } from "sonner";
 
 interface ClientsPageProps {
@@ -95,30 +95,6 @@ export default function ClientsPage({ onSelectClient }: ClientsPageProps) {
   const [editClient, setEditClient] = useState<Client | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [migrationOpen, setMigrationOpen] = useState(false);
-  const [hasMigrationSources, setHasMigrationSources] = useState(false);
-
-  // Detect orphaned/legacy data in localStorage (any mct_accounts_ key not in current clients)
-  useEffect(() => {
-    const knownIds = new Set((clients ?? []).map((c) => c.id));
-    let found = false;
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (!key?.startsWith("mct_accounts_")) continue;
-      const clientId = key.replace("mct_accounts_", "");
-      if (!clientId) continue;
-      if (knownIds.has(clientId)) continue; // skip known clients
-      try {
-        const data = JSON.parse(localStorage.getItem(key) ?? "[]");
-        if (Array.isArray(data) && data.length > 0) {
-          found = true;
-          break;
-        }
-      } catch {
-        /* ignore */
-      }
-    }
-    setHasMigrationSources(found);
-  }, [clients]);
 
   const handleSave = async (data: Omit<Client, "id" | "createdAt">) => {
     try {
@@ -181,16 +157,14 @@ export default function ClientsPage({ onSelectClient }: ClientsPageProps) {
           </div>
 
           <div className="flex items-center gap-2">
-            {hasMigrationSources && (
-              <Button
-                variant="outline"
-                onClick={() => setMigrationOpen(true)}
-                className="border-terminal-amber/40 text-terminal-amber hover:bg-terminal-amber/10 font-mono text-sm shrink-0"
-              >
-                <Database className="w-4 h-4 mr-2" />
-                Import Legacy Data
-              </Button>
-            )}
+            <Button
+              variant="outline"
+              onClick={() => setMigrationOpen(true)}
+              className="border-terminal-amber/40 text-terminal-amber hover:bg-terminal-amber/10 font-mono text-sm shrink-0"
+            >
+              <Database className="w-4 h-4 mr-2" />
+              Import Legacy Data
+            </Button>
             <Button
               onClick={() => {
                 setEditClient(null);
@@ -445,7 +419,6 @@ export default function ClientsPage({ onSelectClient }: ClientsPageProps) {
         open={migrationOpen}
         onClose={() => setMigrationOpen(false)}
         clients={clients ?? []}
-        defaultTargetName="Eric Chartier"
       />
 
       <AlertDialog
