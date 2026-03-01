@@ -1,5 +1,4 @@
 import ClientModal from "@/components/ClientModal";
-import DataMigrationDialog from "@/components/DataMigrationDialog";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -22,7 +21,7 @@ import {
 import { cn } from "@/lib/utils";
 import {
   ArrowRight,
-  Database,
+  LogOut,
   Pencil,
   Plus,
   Terminal,
@@ -36,6 +35,8 @@ import { toast } from "sonner";
 
 interface ClientsPageProps {
   onSelectClient: (client: Client) => void;
+  onSignOut?: () => void;
+  principal?: string;
 }
 
 const RISK_BADGE: Record<
@@ -85,7 +86,16 @@ function AccountCount({ clientId }: { clientId: string }) {
   }
 }
 
-export default function ClientsPage({ onSelectClient }: ClientsPageProps) {
+function truncatePrincipal(principal: string): string {
+  if (principal.length <= 16) return principal;
+  return `${principal.slice(0, 8)}...${principal.slice(-4)}`;
+}
+
+export default function ClientsPage({
+  onSelectClient,
+  onSignOut,
+  principal,
+}: ClientsPageProps) {
   const { data: clients, isLoading } = useGetClients();
   const addClient = useAddClient();
   const updateClient = useUpdateClient();
@@ -94,7 +104,6 @@ export default function ClientsPage({ onSelectClient }: ClientsPageProps) {
   const [modalOpen, setModalOpen] = useState(false);
   const [editClient, setEditClient] = useState<Client | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
-  const [migrationOpen, setMigrationOpen] = useState(false);
 
   const handleSave = async (data: Omit<Client, "id" | "createdAt">) => {
     try {
@@ -157,14 +166,31 @@ export default function ClientsPage({ onSelectClient }: ClientsPageProps) {
           </div>
 
           <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              onClick={() => setMigrationOpen(true)}
-              className="border-terminal-amber/40 text-terminal-amber hover:bg-terminal-amber/10 font-mono text-sm shrink-0"
-            >
-              <Database className="w-4 h-4 mr-2" />
-              Import Legacy Data
-            </Button>
+            {/* Identity pill */}
+            {principal && (
+              <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded border border-terminal-green/20 bg-terminal-green/5 text-[10px] font-mono text-terminal-green-dim">
+                <div className="w-1.5 h-1.5 rounded-full bg-terminal-green opacity-70" />
+                <span className="hidden sm:inline">
+                  {truncatePrincipal(principal)}
+                </span>
+                <span className="sm:hidden">Connected</span>
+              </div>
+            )}
+
+            {/* Sign out */}
+            {onSignOut && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={onSignOut}
+                className="text-muted-foreground hover:text-terminal-red hover:bg-terminal-red/10 font-mono text-xs h-8 px-2"
+                title="Sign out"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline ml-1.5">Sign Out</span>
+              </Button>
+            )}
+
             <Button
               onClick={() => {
                 setEditClient(null);
@@ -413,12 +439,6 @@ export default function ClientsPage({ onSelectClient }: ClientsPageProps) {
         }}
         onSave={handleSave}
         editClient={editClient}
-      />
-
-      <DataMigrationDialog
-        open={migrationOpen}
-        onClose={() => setMigrationOpen(false)}
-        clients={clients ?? []}
       />
 
       <AlertDialog
